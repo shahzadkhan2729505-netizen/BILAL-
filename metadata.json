@@ -1,0 +1,6 @@
+{
+  "name": "Milk Collection",
+  "description": "Professional milk collection, quality testing (SNF, TS, LR, Fat), payments, calculator, and subcenter traceability log sheets.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

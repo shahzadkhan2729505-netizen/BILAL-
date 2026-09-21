@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <external-files-path name="my_pdf_files" path="Documents/" />
+    <external-files-path name="my_download_files" path="Download/" />
+    <cache-path name="my_cache_files" path="pdfs/" />
+    <external-path name="external_files" path="." />
+</paths>
