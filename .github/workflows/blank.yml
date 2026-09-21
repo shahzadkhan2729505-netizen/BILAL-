@@ -14,6 +14,7 @@ permissions:
 
 jobs:
   build:
+    name: Build Debug APK
     runs-on: ubuntu-latest
 
     steps:
@@ -26,14 +27,38 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Configure Android SDK
+        shell: bash
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME" >> $GITHUB_ENV
+          echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> $GITHUB_ENV
+
+          if [ -d "$ANDROID_HOME/cmdline-tools/latest/bin" ]; then
+            echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> $GITHUB_PATH
+          fi
+
+          if [ -d "$ANDROID_HOME/cmdline-tools/16.0/bin" ]; then
+            echo "$ANDROID_HOME/cmdline-tools/16.0/bin" >> $GITHUB_PATH
+          fi
+
+          if [ -d "$ANDROID_HOME/platform-tools" ]; then
+            echo "$ANDROID_HOME/platform-tools" >> $GITHUB_PATH
+          fi
+
+          ls -d "$ANDROID_HOME"/* 2>/dev/null || true
 
       - name: Install Android SDK packages
         shell: bash
         run: |
-          sdkmanager --install "platform-tools" "platforms;android-36" "build-tools;36.0.0"
-          yes | sdkmanager --licenses || true
+          SDKMANAGER_BIN="$(find "$ANDROID_HOME" -path '*/bin/sdkmanager' -type f | head -n 1)"
+          if [ -z "$SDKMANAGER_BIN" ]; then
+            echo "sdkmanager not found"
+            exit 1
+          fi
+
+          echo "Using sdkmanager at: $SDKMANAGER_BIN"
+          yes | "$SDKMANAGER_BIN" --licenses || true
+          "$SDKMANAGER_BIN" --install "platform-tools" "platforms;android-36" "build-tools;36.0.0"
 
       - name: Make gradlew executable
         shell: bash
@@ -43,7 +68,7 @@ jobs:
         shell: bash
         run: ./gradlew --no-daemon assembleDebug
 
-      - name: Upload APK artifact
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: milk-collection-debug-apk
