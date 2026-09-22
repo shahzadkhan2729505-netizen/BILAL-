@@ -33,6 +33,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import com.example.ui.components.AppFormField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -104,15 +105,16 @@ fun ReportsScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Spacer(modifier = Modifier.height(10.dp))
-                    OutlinedTextField(
+                    AppFormField(
+                        label = "BACKUP JSON PAYLOAD",
                         value = restoreJsonText,
                         onValueChange = { restoreJsonText = it },
-                        placeholder = { Text("Paste JSON here...") },
+                        placeholder = "Paste JSON here...",
+                        singleLine = false,
                         maxLines = 8,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(160.dp),
-                        shape = RoundedCornerShape(8.dp)
+                            .height(160.dp)
                     )
                     if (restoreResultMsg != null) {
                         Spacer(modifier = Modifier.height(6.dp))

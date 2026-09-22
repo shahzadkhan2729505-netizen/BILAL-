@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -25,17 +26,22 @@ import androidx.compose.material.icons.filled.CalendarToday
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Phone
+import androidx.compose.material.icons.filled.Send
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -44,6 +50,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -52,13 +59,17 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.data.auth.AuthManager
+import com.example.data.model.Farmer
+import com.example.data.model.MilkRecord
 import com.example.ui.MainViewModel
+import com.example.ui.components.AppFormField
 import com.example.ui.theme.AppGradients
-import com.example.ui.theme.MilkAmber
 import com.example.ui.theme.MilkBlue
 import com.example.ui.theme.MilkGreen
 import com.example.ui.theme.MilkNavy
 import com.example.ui.theme.MilkSky
+import com.example.util.WhatsAppNotifier
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -72,11 +83,19 @@ fun MilkEntryScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val authManager = remember { AuthManager.getInstance(context) }
+    val userProfile by authManager.userProfile.collectAsStateWithLifecycle()
     val formState by viewModel.entryFormState.collectAsStateWithLifecycle()
     val farmers by viewModel.farmers.collectAsStateWithLifecycle()
 
     var farmerDropdownExpanded by remember { mutableStateOf(false) }
     var showFormulaInfo by remember { mutableStateOf(false) }
+
+    var farmerError by remember { mutableStateOf<String?>(null) }
+    var litersError by remember { mutableStateOf<String?>(null) }
+    var fatError by remember { mutableStateOf<String?>(null) }
+    var lrError by remember { mutableStateOf<String?>(null) }
+    var rateError by remember { mutableStateOf<String?>(null) }
 
     // Date Picker Dialog setup
     val calendar = remember { Calendar.getInstance() }
@@ -97,6 +116,7 @@ fun MilkEntryScreen(
     }
 
     val selectedFarmer = farmers.find { it.id == formState.selectedFarmerId }
+    var autoSendWhatsApp by remember { mutableStateOf(true) }
 
     LazyColumn(
         modifier = modifier
@@ -132,26 +152,29 @@ fun MilkEntryScreen(
 
                     Spacer(modifier = Modifier.height(14.dp))
 
-                    // Farmer Dropdown
+                    // Farmer Selection Field (Structured AppFormField with Dropdown)
                     Box(modifier = Modifier.fillMaxWidth()) {
-                        OutlinedTextField(
-                            value = if (selectedFarmer != null) "${selectedFarmer.id} — ${selectedFarmer.name}" else "",
+                        AppFormField(
+                            label = "SELECT REGISTERED FARMER *",
+                            value = if (selectedFarmer != null) "${selectedFarmer.id} — ${selectedFarmer.name} (${selectedFarmer.village})" else "",
                             onValueChange = {},
+                            placeholder = "Tap to choose farmer...",
                             readOnly = true,
-                            label = { Text("FARMER *") },
-                            placeholder = { Text("Select registered farmer") },
+                            onClick = {
+                                farmerDropdownExpanded = true
+                                farmerError = null
+                            },
+                            errorMessage = farmerError,
                             trailingIcon = {
                                 Icon(
                                     Icons.Default.ArrowDropDown,
-                                    contentDescription = null,
-                                    modifier = Modifier.clickable { farmerDropdownExpanded = true }
+                                    contentDescription = "Open Farmer List",
+                                    tint = MilkBlue,
+                                    modifier = Modifier.size(28.dp)
                                 )
                             },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { farmerDropdownExpanded = true }
-                                .testTag("entry_farmer_dropdown"),
-                            shape = RoundedCornerShape(10.dp)
+                            modifier = Modifier.fillMaxWidth(),
+                            testTag = "entry_farmer_dropdown"
                         )
 
                         DropdownMenu(
@@ -161,25 +184,45 @@ fun MilkEntryScreen(
                         ) {
                             if (farmers.isEmpty()) {
                                 DropdownMenuItem(
-                                    text = { Text("No farmers registered yet") },
+                                    text = { Text("No farmers registered yet. Please register farmer first.") },
                                     onClick = { farmerDropdownExpanded = false }
                                 )
                             } else {
                                 farmers.forEach { farmer ->
                                     DropdownMenuItem(
                                         text = {
-                                            Column {
-                                                Text("${farmer.id} — ${farmer.name}", fontWeight = FontWeight.Bold)
-                                                Text(
-                                                    "${farmer.village} • Default Rs ${farmer.defaultRate}",
-                                                    fontSize = 12.sp,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                                )
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                            ) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(32.dp)
+                                                        .clip(CircleShape)
+                                                        .background(MilkBlue.copy(alpha = 0.15f)),
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    Icon(
+                                                        Icons.Default.Person,
+                                                        contentDescription = null,
+                                                        tint = MilkBlue,
+                                                        modifier = Modifier.size(18.dp)
+                                                    )
+                                                }
+                                                Column {
+                                                    Text("${farmer.id} — ${farmer.name}", fontWeight = FontWeight.Bold)
+                                                    Text(
+                                                        "${farmer.village} • WhatsApp: ${farmer.mobile} • Default Rs ${farmer.defaultRate}",
+                                                        fontSize = 12.sp,
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                    )
+                                                }
                                             }
                                         },
                                         onClick = {
                                             viewModel.onEntryFarmerChanged(farmer.id)
                                             farmerDropdownExpanded = false
+                                            farmerError = null
                                         }
                                     )
                                 }
@@ -187,33 +230,36 @@ fun MilkEntryScreen(
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(10.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
 
                     // Date Field
-                    OutlinedTextField(
+                    AppFormField(
+                        label = "COLLECTION DATE",
                         value = formState.date,
                         onValueChange = { viewModel.onEntryDateChanged(it) },
-                        label = { Text("DATE") },
+                        placeholder = "YYYY-MM-DD",
+                        readOnly = true,
+                        onClick = { datePickerDialog.show() },
                         trailingIcon = {
                             IconButton(onClick = { datePickerDialog.show() }) {
-                                Icon(Icons.Default.CalendarToday, contentDescription = "Pick Date")
+                                Icon(Icons.Default.CalendarToday, contentDescription = "Pick Date", tint = MilkBlue)
                             }
                         },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("entry_date_field"),
-                        shape = RoundedCornerShape(10.dp)
+                        modifier = Modifier.fillMaxWidth(),
+                        testTag = "entry_date_field"
                     )
 
-                    Spacer(modifier = Modifier.height(10.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
 
                     // Quick Milk Quality Presets
                     Text(
-                        text = "Quick Quality Presets:",
+                        text = "QUICK QUALITY PRESETS:",
                         fontSize = 11.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF64748B),
+                        letterSpacing = 0.5.sp
                     )
+                    Spacer(modifier = Modifier.height(6.dp))
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -222,115 +268,127 @@ fun MilkEntryScreen(
                             onClick = {
                                 viewModel.onEntryFatChanged("6.50")
                                 viewModel.onEntryLrChanged("29.0")
+                                fatError = null
+                                lrError = null
                             },
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                            shape = RoundedCornerShape(8.dp),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                            shape = RoundedCornerShape(10.dp),
                             modifier = Modifier.weight(1f)
                         ) {
-                            Text("🐃 Buffalo (6.5/29)", fontSize = 10.sp, maxLines = 1)
+                            Text("🐃 Buffalo (6.5/29)", fontSize = 10.5.sp, maxLines = 1)
                         }
 
                         OutlinedButton(
                             onClick = {
                                 viewModel.onEntryFatChanged("3.80")
                                 viewModel.onEntryLrChanged("28.0")
+                                fatError = null
+                                lrError = null
                             },
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                            shape = RoundedCornerShape(8.dp),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                            shape = RoundedCornerShape(10.dp),
                             modifier = Modifier.weight(1f)
                         ) {
-                            Text("🐄 Cow (3.8/28)", fontSize = 10.sp, maxLines = 1)
+                            Text("🐄 Cow (3.8/28)", fontSize = 10.5.sp, maxLines = 1)
                         }
 
                         OutlinedButton(
                             onClick = {
                                 viewModel.onEntryFatChanged("7.00")
                                 viewModel.onEntryLrChanged("30.0")
+                                fatError = null
+                                lrError = null
                             },
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                            shape = RoundedCornerShape(8.dp),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                            shape = RoundedCornerShape(10.dp),
                             modifier = Modifier.weight(1f)
                         ) {
-                            Text("⭐ Rich (7.0/30)", fontSize = 10.sp, maxLines = 1)
+                            Text("⭐ Rich (7.0/30)", fontSize = 10.5.sp, maxLines = 1)
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(10.dp))
+                    Spacer(modifier = Modifier.height(14.dp))
 
                     // Milk Liters & Fat %
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        OutlinedTextField(
+                        AppFormField(
+                            label = "MILK QUANTITY (L) *",
                             value = formState.litersText,
-                            onValueChange = { viewModel.onEntryLitersChanged(it) },
-                            label = { Text("MILK (LITERS) *") },
-                            placeholder = { Text("0.00") },
+                            onValueChange = {
+                                viewModel.onEntryLitersChanged(it)
+                                if (litersError != null) litersError = null
+                            },
+                            placeholder = "0.00",
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                            modifier = Modifier
-                                .weight(1f)
-                                .testTag("entry_liters_field"),
-                            shape = RoundedCornerShape(10.dp)
+                            errorMessage = litersError,
+                            modifier = Modifier.weight(1f),
+                            testTag = "entry_liters_field"
                         )
 
-                        OutlinedTextField(
+                        AppFormField(
+                            label = "FAT PERCENTAGE (%) *",
                             value = formState.fatText,
-                            onValueChange = { viewModel.onEntryFatChanged(it) },
-                            label = { Text("FAT (%) *") },
-                            placeholder = { Text("0.00") },
+                            onValueChange = {
+                                viewModel.onEntryFatChanged(it)
+                                if (fatError != null) fatError = null
+                            },
+                            placeholder = "0.00",
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                            modifier = Modifier
-                                .weight(1f)
-                                .testTag("entry_fat_field"),
-                            shape = RoundedCornerShape(10.dp)
+                            errorMessage = fatError,
+                            modifier = Modifier.weight(1f),
+                            testTag = "entry_fat_field"
                         )
                     }
 
-                    Spacer(modifier = Modifier.height(10.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
 
                     // LR / CLR & Rate (Rs/L)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        OutlinedTextField(
+                        AppFormField(
+                            label = "LACTOMETER (LR) *",
                             value = formState.lrText,
-                            onValueChange = { viewModel.onEntryLrChanged(it) },
-                            label = { Text("LR / CLR *") },
-                            placeholder = { Text("28.0") },
+                            onValueChange = {
+                                viewModel.onEntryLrChanged(it)
+                                if (lrError != null) lrError = null
+                            },
+                            placeholder = "28.0",
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                            modifier = Modifier
-                                .weight(1f)
-                                .testTag("entry_lr_field"),
-                            shape = RoundedCornerShape(10.dp)
+                            errorMessage = lrError,
+                            modifier = Modifier.weight(1f),
+                            testTag = "entry_lr_field"
                         )
 
-                        OutlinedTextField(
+                        AppFormField(
+                            label = "RATE PER LITER (RS) *",
                             value = formState.rateText,
-                            onValueChange = { viewModel.onEntryRateChanged(it) },
-                            label = { Text("RATE (RS/L) *") },
-                            placeholder = { Text("200.00") },
+                            onValueChange = {
+                                viewModel.onEntryRateChanged(it)
+                                if (rateError != null) rateError = null
+                            },
+                            placeholder = "200.00",
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                            modifier = Modifier
-                                .weight(1f)
-                                .testTag("entry_rate_field"),
-                            shape = RoundedCornerShape(10.dp)
+                            errorMessage = rateError,
+                            modifier = Modifier.weight(1f),
+                            testTag = "entry_rate_field"
                         )
                     }
 
-                    Spacer(modifier = Modifier.height(10.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
 
                     // Remarks
-                    OutlinedTextField(
+                    AppFormField(
+                        label = "REMARKS / NOTES",
                         value = formState.remarks,
                         onValueChange = { viewModel.onEntryRemarksChanged(it) },
-                        label = { Text("REMARKS (OPTIONAL)") },
-                        placeholder = { Text("e.g. Morning, Good quality") },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("entry_remarks_field"),
-                        shape = RoundedCornerShape(10.dp)
+                        placeholder = "e.g. Morning collection, Good quality",
+                        modifier = Modifier.fillMaxWidth(),
+                        testTag = "entry_remarks_field"
                     )
 
                     Spacer(modifier = Modifier.height(16.dp))
@@ -378,6 +436,108 @@ fun MilkEntryScreen(
                         }
                     }
 
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    // WhatsApp Auto-Notification Card (Shows clear distinction between Owner Sender & Farmer Recipient)
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = Color(0xFFF0FDF4), // Emerald 50
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF86EFAC)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(14.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(34.dp)
+                                            .clip(CircleShape)
+                                            .background(Color(0xFF22C55E).copy(alpha = 0.15f)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Send,
+                                            contentDescription = "WhatsApp",
+                                            tint = Color(0xFF15803D),
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Column {
+                                        Text(
+                                            text = "WhatsApp Slip Notification",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 13.sp,
+                                            color = Color(0xFF14532D)
+                                        )
+                                        Text(
+                                            text = "Instant receipt with Liters, Fat, LR, TS & Payment",
+                                            fontSize = 11.sp,
+                                            color = Color(0xFF166534)
+                                        )
+                                    }
+                                }
+                                Checkbox(
+                                    checked = autoSendWhatsApp,
+                                    onCheckedChange = { autoSendWhatsApp = it },
+                                    colors = CheckboxDefaults.colors(
+                                        checkedColor = Color(0xFF16A34A),
+                                        checkmarkColor = Color.White
+                                    ),
+                                    modifier = Modifier.testTag("entry_whatsapp_auto_checkbox")
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            // Sender (Owner) details
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(start = 6.dp)
+                            ) {
+                                Text(
+                                    text = "FROM (Dairy Owner): ",
+                                    fontSize = 10.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF475569)
+                                )
+                                Text(
+                                    text = if (userProfile.ownerWhatsApp.isNotBlank()) userProfile.ownerWhatsApp else "Not set",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = Color(0xFF0F172A)
+                                )
+                            }
+
+                            // Recipient (Farmer) details
+                            val farmerMobile = selectedFarmer?.mobile.orEmpty().trim()
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(start = 6.dp, top = 2.dp)
+                            ) {
+                                Text(
+                                    text = "TO (Farmer WhatsApp): ",
+                                    fontSize = 10.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF166534)
+                                )
+                                Text(
+                                    text = if (farmerMobile.isNotEmpty()) farmerMobile else if (selectedFarmer != null) "Missing number" else "Select farmer first",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (farmerMobile.isNotEmpty()) Color(0xFF15803D) else MaterialTheme.colorScheme.error
+                                )
+                            }
+                        }
+                    }
+
                     Spacer(modifier = Modifier.height(18.dp))
 
                     // Actions: Save & Cancel
@@ -387,7 +547,49 @@ fun MilkEntryScreen(
                     ) {
                         Button(
                             onClick = {
-                                viewModel.saveMilkEntry(onSuccess = onSuccessSaved)
+                                var hasError = false
+                                if (formState.selectedFarmerId.isEmpty() || selectedFarmer == null) {
+                                    farmerError = "Farmer selection is required."
+                                    hasError = true
+                                }
+                                val litersVal = formState.litersText.toDoubleOrNull()
+                                if (litersVal == null || litersVal <= 0.0) {
+                                    litersError = "Enter valid milk liters (> 0)."
+                                    hasError = true
+                                }
+                                val fatVal = formState.fatText.toDoubleOrNull()
+                                if (fatVal == null || fatVal <= 0.0) {
+                                    fatError = "Enter valid fat %."
+                                    hasError = true
+                                }
+                                val lrVal = formState.lrText.toDoubleOrNull()
+                                if (lrVal == null || lrVal <= 0.0) {
+                                    lrError = "Enter valid LR."
+                                    hasError = true
+                                }
+                                val rateVal = formState.rateText.toDoubleOrNull()
+                                if (rateVal == null || rateVal <= 0.0) {
+                                    rateError = "Enter valid rate."
+                                    hasError = true
+                                }
+
+                                if (hasError) return@Button
+
+                                viewModel.saveMilkEntry(onSuccess = { savedRecord, farmer ->
+                                    if (autoSendWhatsApp) {
+                                        val message = WhatsAppNotifier.buildMilkEntryMessage(
+                                            record = savedRecord,
+                                            farmerMobile = farmer.mobile,
+                                            ownerWhatsApp = userProfile.ownerWhatsApp
+                                        )
+                                        WhatsAppNotifier.sendWhatsAppMessage(
+                                            context = context,
+                                            rawPhone = farmer.mobile,
+                                            message = message
+                                        )
+                                    }
+                                    onSuccessSaved()
+                                })
                             },
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = MilkGreen,

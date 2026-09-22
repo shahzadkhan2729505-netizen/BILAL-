@@ -6,6 +6,8 @@ import android.print.PrintAttributes
 import android.print.PrintManager
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -34,11 +36,16 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FileDownload
+import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Print
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.SelectAll
+import androidx.compose.material.icons.filled.TableChart
+import androidx.compose.material.icons.filled.UploadFile
+import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -52,6 +59,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import com.example.ui.components.AppFormField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -59,6 +67,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -74,22 +83,22 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.traceability.ExcelAiEngine
 import com.example.traceability.TraceabilityEngine
 import com.example.ui.MainViewModel
 import com.example.ui.TraceRowUi
+import com.example.ui.components.FullScreenExcelStudioDialog
+import com.example.ui.components.FullScreenPdfPreviewDialog
 import com.example.ui.theme.MilkAmber
 import com.example.ui.theme.MilkBlue
 import com.example.ui.theme.MilkGreen
 import com.example.ui.theme.MilkNavy
 import com.example.ui.theme.MilkRed
 import com.example.ui.theme.MilkSky
-
-import androidx.compose.material.icons.filled.PictureAsPdf
-import androidx.compose.material.icons.filled.TableChart
-import androidx.compose.material.icons.filled.Visibility
-import com.example.ui.components.FullScreenExcelStudioDialog
-import com.example.ui.components.FullScreenPdfPreviewDialog
 import com.example.util.PdfGenerator
+import com.example.util.SheetFileParser
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -98,6 +107,7 @@ fun AiSheetScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
     val traceState by viewModel.traceState.collectAsStateWithLifecycle()
 
     var showClearConfirm by remember { mutableStateOf(false) }
@@ -105,6 +115,30 @@ fun AiSheetScreen(
     var showFullScreenExcelStudio by remember { mutableStateOf(false) }
     var showFullScreenPdfPreview by remember { mutableStateOf(false) }
     var showDownloadSuccessDialog by remember { mutableStateOf(false) }
+    var showAiSheetDialog by remember { mutableStateOf(false) }
+    var uploadStatusNotification by remember { mutableStateOf<String?>(null) }
+
+    val filePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: android.net.Uri? ->
+        if (uri != null) {
+            coroutineScope.launch(Dispatchers.IO) {
+                try {
+                    val parsed = SheetFileParser.parseUploadedFile(context, uri)
+                    viewModel.replaceTraceSheetData(
+                        newSupplierCode = parsed.supplierCode,
+                        newSupplierName = parsed.supplierName,
+                        newVillageName = parsed.villageName,
+                        newRows = parsed.rows,
+                        sourceFileName = parsed.fileName
+                    )
+                    uploadStatusNotification = "✓ Sheet replaced with: ${parsed.fileName}"
+                } catch (e: Exception) {
+                    uploadStatusNotification = "Failed to load uploaded file"
+                }
+            }
+        }
+    }
 
     fun shareExport(name: String, content: String, mimeType: String = "text/html") {
         val intent = Intent().apply {
@@ -123,7 +157,11 @@ fun AiSheetScreen(
             override fun onPageFinished(view: WebView, url: String) {
                 val printManager = context.getSystemService(Context.PRINT_SERVICE) as? PrintManager
                 val printAdapter = webView.createPrintDocumentAdapter("Subcenter_Traceability_Log_Sheet")
-                printManager?.print("Traceability_Log_Sheet", printAdapter, PrintAttributes.Builder().build())
+                val printAttributes = PrintAttributes.Builder()
+                    .setMediaSize(PrintAttributes.MediaSize.ISO_A4.asLandscape())
+                    .setMinMargins(PrintAttributes.Margins.NO_MARGINS)
+                    .build()
+                printManager?.print("Traceability_Log_Sheet", printAdapter, printAttributes)
             }
         }
         webView.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null)
@@ -248,46 +286,43 @@ fun AiSheetScreen(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        OutlinedTextField(
+                        AppFormField(
+                            label = "SUPPLIER CODE *",
                             value = traceState.supplierCode,
                             onValueChange = {
                                 viewModel.updateTraceHeader(it, traceState.supplierName, traceState.sourceType, traceState.villageName, traceState.farmerNameHint, traceState.isAutoMode)
                             },
-                            label = { Text("SUPPLIER CODE *") },
-                            placeholder = { Text("e.g. 0S1055") },
+                            placeholder = "e.g. 0S1055",
                             modifier = Modifier
                                 .weight(1f)
-                                .testTag("trace_supplier_code_input"),
-                            shape = RoundedCornerShape(10.dp)
+                                .testTag("trace_supplier_code_input")
                         )
 
-                        OutlinedTextField(
+                        AppFormField(
+                            label = "SOURCE TYPE",
                             value = traceState.sourceType,
                             onValueChange = {
                                 viewModel.updateTraceHeader(traceState.supplierCode, traceState.supplierName, it, traceState.villageName, traceState.farmerNameHint, traceState.isAutoMode)
                             },
-                            label = { Text("SOURCE TYPE") },
-                            placeholder = { Text("DO") },
+                            placeholder = "DO",
                             modifier = Modifier
                                 .weight(1f)
-                                .testTag("trace_source_type_input"),
-                            shape = RoundedCornerShape(10.dp)
+                                .testTag("trace_source_type_input")
                         )
                     }
 
                     Spacer(modifier = Modifier.height(10.dp))
 
-                    OutlinedTextField(
+                    AppFormField(
+                        label = "SUPPLIER NAME *",
                         value = traceState.supplierName,
                         onValueChange = {
                             viewModel.updateTraceHeader(traceState.supplierCode, it, traceState.sourceType, traceState.villageName, traceState.farmerNameHint, traceState.isAutoMode)
                         },
-                        label = { Text("SUPPLIER NAME *") },
-                        placeholder = { Text("e.g. Bilal Ahmad Milk Collection") },
+                        placeholder = "e.g. Bilal Ahmad Milk Collection",
                         modifier = Modifier
                             .fillMaxWidth()
-                            .testTag("trace_supplier_name_input"),
-                        shape = RoundedCornerShape(10.dp)
+                            .testTag("trace_supplier_name_input")
                     )
 
                     Spacer(modifier = Modifier.height(10.dp))
@@ -296,30 +331,28 @@ fun AiSheetScreen(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        OutlinedTextField(
+                        AppFormField(
+                            label = "VILLAGE NAME (TOP) *",
                             value = traceState.villageName,
                             onValueChange = {
                                 viewModel.updateTraceHeader(traceState.supplierCode, traceState.supplierName, traceState.sourceType, it, traceState.farmerNameHint, traceState.isAutoMode)
                             },
-                            label = { Text("VILLAGE NAME (TOP) *") },
-                            placeholder = { Text("Village name") },
+                            placeholder = "Village name",
                             modifier = Modifier
                                 .weight(1f)
-                                .testTag("trace_village_name_input"),
-                            shape = RoundedCornerShape(10.dp)
+                                .testTag("trace_village_name_input")
                         )
 
-                        OutlinedTextField(
+                        AppFormField(
+                            label = "1ST FARMER (OPTIONAL)",
                             value = traceState.farmerNameHint,
                             onValueChange = {
                                 viewModel.updateTraceHeader(traceState.supplierCode, traceState.supplierName, traceState.sourceType, traceState.villageName, it, traceState.isAutoMode)
                             },
-                            label = { Text("1ST FARMER (OPTIONAL)") },
-                            placeholder = { Text("Leave blank for auto Urdu") },
+                            placeholder = "Leave blank for auto Urdu",
                             modifier = Modifier
                                 .weight(1f)
-                                .testTag("trace_farmer_name_hint_input"),
-                            shape = RoundedCornerShape(10.dp)
+                                .testTag("trace_farmer_name_hint_input")
                         )
                     }
                 }
@@ -531,6 +564,98 @@ fun AiSheetScreen(
                     }
 
                     Spacer(modifier = Modifier.height(10.dp))
+
+                    // Professional Excel + PDF Upload Workspace & Free AI Assistant
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = Color(0xFFF0FDF4),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF86EFAC)),
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        Icons.Default.CloudUpload,
+                                        contentDescription = null,
+                                        tint = Color(0xFF15803D),
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = "Professional Document Workspace",
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFF14532D)
+                                    )
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(4.dp))
+                                        .background(Color(0xFFDCFCE7))
+                                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                                ) {
+                                    Text("Free Built-in AI", color = Color(0xFF15803D), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "Upload your custom Excel (.xlsx/.xls/.csv) or PDF document. The app preserves original formatting, layout, fonts, and A4 borders with zero freezing or crashes.",
+                                fontSize = 11.sp,
+                                color = Color(0xFF166534),
+                                lineHeight = 15.sp
+                            )
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Button(
+                                    onClick = { filePickerLauncher.launch("*/*") },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7)),
+                                    shape = RoundedCornerShape(10.dp),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(44.dp)
+                                        .testTag("upload_replace_sheet_main_button")
+                                ) {
+                                    Icon(Icons.Default.UploadFile, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Upload Excel / PDF", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                }
+
+                                Button(
+                                    onClick = { showAiSheetDialog = true },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF107C41)),
+                                    shape = RoundedCornerShape(10.dp),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(44.dp)
+                                        .testTag("free_ai_sheet_assistant_button")
+                                ) {
+                                    Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("AI Document Agent", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    }
+
+                    if (uploadStatusNotification != null) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = uploadStatusNotification!!,
+                            color = MilkGreen,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(6.dp))
 
                     // Full Screen Excel Studio & Single-Page PDF Preview Trigger Ribbon
                     Surface(
@@ -833,7 +958,7 @@ fun AiSheetScreen(
 
                         HorizontalDivider(color = Color.Black, thickness = 1.dp)
 
-                        // 70 Rows
+                        // 70 Rows rendered with lightweight Text (Zero UI thread lag, instant scrolling)
                         traceState.rows.forEachIndexed { i, row ->
                             val isEven = i % 2 == 0
                             val rowBg = if (isEven) Color(0xFFF8FAFC) else Color.White
@@ -841,7 +966,8 @@ fun AiSheetScreen(
                             Row(
                                 modifier = Modifier
                                     .background(rowBg)
-                                    .padding(vertical = 4.dp, horizontal = 4.dp),
+                                    .clickable { showFullScreenExcelStudio = true }
+                                    .padding(vertical = 5.dp, horizontal = 4.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
@@ -851,14 +977,16 @@ fun AiSheetScreen(
                                     textAlign = TextAlign.Center
                                 )
 
-                                // Farmer Name Input (editable)
-                                BasicTextField(
-                                    value = row.name,
-                                    onValueChange = { viewModel.updateRowFarmerName(row.sr, it) },
+                                // Farmer Name
+                                Text(
+                                    text = row.name,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = Color(0xFF0F172A),
+                                    maxLines = 1,
                                     modifier = Modifier
                                         .width(170.dp)
-                                        .padding(horizontal = 4.dp),
-                                    textStyle = TextStyle(fontSize = 12.sp, color = Color.Black)
+                                        .padding(horizontal = 4.dp)
                                 )
 
                                 // Village (stays blank per specification)
@@ -866,9 +994,6 @@ fun AiSheetScreen(
 
                                 // Month Values
                                 TraceabilityEngine.TRACE_MONTHS.forEach { m ->
-                                    val isSelected = traceState.selectedMonths.contains(m)
-                                    val cfg = traceState.monthConfigs[m]
-                                    val active = cfg != null && i < cfg.count
                                     val valNum = row.values[m]
                                     val valStr = if (valNum != null && valNum > 0) TraceabilityEngine.formatNumber(valNum) else ""
 
@@ -876,22 +1001,13 @@ fun AiSheetScreen(
                                         modifier = Modifier.width(52.dp),
                                         contentAlignment = Alignment.Center
                                     ) {
-                                        if (isSelected && active) {
-                                            BasicTextField(
-                                                value = valStr,
-                                                onValueChange = { viewModel.updateRowMonthValue(row.sr, m, it) },
-                                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                                                textStyle = TextStyle(
-                                                    fontSize = 11.sp,
-                                                    fontWeight = FontWeight.Bold,
-                                                    textAlign = TextAlign.Center,
-                                                    color = Color.Black
-                                                ),
-                                                modifier = Modifier.fillMaxWidth()
-                                            )
-                                        } else {
-                                            Text(valStr, fontSize = 11.sp, textAlign = TextAlign.Center)
-                                        }
+                                        Text(
+                                            text = valStr,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            color = if (valStr.isNotEmpty()) Color(0xFF1E293B) else Color(0xFF94A3B8),
+                                            textAlign = TextAlign.Center
+                                        )
                                     }
 
                                     if (TraceabilityEngine.VERIFICATION_MONTHS.contains(m)) {
@@ -1036,6 +1152,95 @@ fun AiSheetScreen(
             }
         )
     }
+
+    if (showAiSheetDialog) {
+        val auditReport = remember(traceState) {
+            ExcelAiEngine.auditSheet(traceState)
+        }
+
+        AlertDialog(
+            onDismissRequest = { showAiSheetDialog = false },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = MilkGreen)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Free Excel AI Assistant", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                }
+            },
+            text = {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = if (auditReport.auditReadinessScore >= 80) Color(0xFFE8F5E9) else Color(0xFFFFF3E0),
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(10.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Audit Compliance Score:",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                text = "${auditReport.auditReadinessScore}%",
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = if (auditReport.auditReadinessScore >= 80) MilkGreen else Color(0xFFE65100)
+                            )
+                        }
+                    }
+
+                    Text(
+                        text = auditReport.summaryTextUrdu,
+                        fontSize = 12.sp,
+                        lineHeight = 18.sp,
+                        color = Color(0xFF1E293B)
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            onClick = {
+                                viewModel.applyAiAutoBalance()
+                                uploadStatusNotification = "✓ AI Auto-Balance Completed"
+                                showAiSheetDialog = false
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = MilkGreen),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.weight(1f).height(40.dp)
+                        ) {
+                            Text("Auto-Balance", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+
+                        Button(
+                            onClick = {
+                                viewModel.applyAiSmartComplete()
+                                uploadStatusNotification = "✓ AI Smart Complete Applied"
+                                showAiSheetDialog = false
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = MilkNavy),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.weight(1f).height(40.dp)
+                        ) {
+                            Text("Smart Fill", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                OutlinedButton(onClick = { showAiSheetDialog = false }) {
+                    Text("Close")
+                }
+            }
+        )
+    }
 }
 
 @Composable
@@ -1052,25 +1257,34 @@ fun SheetChip(text: String) {
 
 fun generateTraceHtml(state: com.example.ui.TraceSheetUiState): String {
     val sb = StringBuilder()
+    val isLarge = state.rows.size > 40
+    val fontSize = if (isLarge) "6.6px" else "7.8px"
+    val lineHeight = if (isLarge) "8.0px" else "9.5px"
+    val cellPadding = if (isLarge) "0.5px 1px" else "1.5px 2px"
+
     sb.append("<!doctype html><html><head><meta charset=\"utf-8\"><style>")
-    sb.append("@page{size:A4 landscape;margin:4mm}@media print{body{zoom:0.75;-webkit-print-color-adjust:exact}}body{font-family:Arial,sans-serif;margin:4mm;color:#111}")
-    sb.append(".sheet{border-collapse:collapse;width:100%;table-layout:fixed;page-break-inside:avoid}.sheet td,.sheet th{border:1px solid #111;text-align:center;padding:1px 2px;font-size:7.5px;line-height:9px}")
-    sb.append(".sheet th{background:#dce3e9;font-weight:700}.brand{text-align:left!important;border:0!important;font-size:14px!important;font-weight:800}")
-    sb.append(".sub{font-size:8px;font-weight:700}.meta{border:0!important;text-align:left!important;font-size:8px!important}.right{text-align:right!important}")
-    sb.append(".title{font-size:14px!important;background:#dce3e9;font-weight:800}.left{text-align:left!important}.total{background:#dce3e9;font-weight:800;font-size:8.5px!important}</style></head><body>")
+    sb.append("@page{size:A4 landscape;margin:2.5mm 3mm 2.5mm 3mm}@media print{html,body{width:100%;height:100%;margin:0;padding:0;overflow:hidden;-webkit-print-color-adjust:exact;print-color-adjust:exact}.sheet{page-break-after:avoid;page-break-inside:avoid}}")
+    sb.append("*{box-sizing:border-box}body{font-family:Arial,Helvetica,sans-serif;margin:0;padding:2mm;color:#0f172a;-webkit-text-size-adjust:100%}")
+    sb.append(".sheet{border-collapse:collapse;width:100%;table-layout:fixed;page-break-inside:avoid;page-break-after:avoid}")
+    sb.append(".sheet td,.sheet th{border:0.65px solid #1e293b;text-align:center;padding:$cellPadding;font-size:$fontSize;line-height:$lineHeight}")
+    sb.append(".sheet th{background:#dce3e9;font-weight:700}.brand{text-align:left!important;border:0!important;font-size:12px!important;font-weight:800;line-height:14px!important}")
+    sb.append(".sub{font-size:7.5px;font-weight:700;color:#334155}.meta{border:0!important;text-align:left!important;font-size:7.5px!important;line-height:9px!important}.right{text-align:right!important}")
+    sb.append(".title{font-size:12px!important;background:#dce3e9;font-weight:800;padding:2px 0!important}.left{text-align:left!important;padding-left:3px!important}.total{background:#dce3e9;font-weight:800;font-size:$fontSize!important}</style></head><body>")
+
+    val nestleSvg = """<svg width="125" height="32" viewBox="0 0 160 44" fill="#1e293b" xmlns="http://www.w3.org/2000/svg"><path d="M6,34 Q20,31 34,33 Q42,34 46,31 Q40,36 28,36 Q16,36 6,34 Z"/><path d="M14,24 Q24,37 36,24 Q32,32 18,31 Z"/><path d="M11,15 Q14,11 18,12 Q20,13 22,17 Q25,20 22,23 Q18,25 15,22 Q12,20 11,15 Z"/><path d="M18,12 Q20,10 23,10 Q25,10 26,12 L29,13 L26,14 Q24,15 22,14 Z"/><path d="M15,14 Q22,8 30,12 Q27,15 21,17 Z"/><path d="M23,20 Q24,16 26,16 L28,18 Q27,21 24,22 Z"/><path d="M27,19 Q29,15 31,16 L33,18 Q31,21 28,21 Z"/><path d="M31,20 Q33,16 35,17 L36,19 Q34,22 32,22 Z"/><path d="M52,12 L57,12 L57,32 L52,32 Z"/><path d="M56,12 L67,29 L67,12 L71,12 L71,32 L66,32 L55,15 Z"/><path d="M67,12 L72,12 L72,32 L67,32 Z"/><path d="M52,8 L138,8 L138,11.5 L52,11.5 Z"/><path d="M76,24 Q76,17 83,17 Q90,17 90,24 L79.5,24 Q79.5,28.5 83.5,28.5 Q86,28.5 88,27.5 L89,30 Q86.5,31.5 83,31.5 Q76,31.5 76,24 Z M86.5,21.5 Q86.5,19.5 83,19.5 Q79.8,19.5 79.5,21.5 Z"/><path d="M94,28.5 Q95.5,29.3 97.5,29.3 Q99.5,29.3 99.5,28 Q99.5,26.8 97,26.2 Q93,25.2 93,21.5 Q93,17.2 98,17.2 Q100.5,17.2 102.5,18.2 L101.5,20.5 Q99.8,19.5 98,19.5 Q96,19.5 96,20.5 Q96,21.5 98.5,22 Q103,23.2 103,27 Q103,31.5 97.5,31.5 Q95,31.5 92.5,30.3 Z"/><path d="M106,14 L110,14 L110,18 L114,18 L114,20.5 L110,20.5 L110,27.5 Q110,29 111.5,29 Q112.5,29 113.5,28.5 L114,31 Q112.5,31.5 110.5,31.5 Q106.5,31.5 106.5,27 L106.5,20.5 L104,20.5 L104,18 L106.5,18 Z"/><path d="M118,10 L122.5,10 L122.5,32 L118,32 Z"/><path d="M126,24 Q126,17 133,17 Q140,17 140,24 L129.5,24 Q129.5,28.5 133.5,28.5 Q136,28.5 138,27.5 L139,30 Q136.5,31.5 133,31.5 Q126,31.5 126,24 Z M136.5,21.5 Q136.5,19.5 133,19.5 Q129.8,19.5 129.5,21.5 Z M135.5,12.5 L138.5,12.5 L135,16 L132.5,16 Z"/></svg>"""
 
     sb.append("<table class=\"sheet\">")
-    sb.append("<tr><td colspan=\"5\" class=\"brand\">Nestlé Pakistan Ltd.<br><span class=\"sub\">(Milk Collection &amp; Dairy Development)</span></td><td colspan=\"12\" class=\"right\" style=\"border:0;font-weight:bold\">Subcenter Traceability Log Sheet</td></tr>")
-    sb.append("<tr><td colspan=\"5\" class=\"meta\">Document #: 1583-CAM-D4-13.00</td><td colspan=\"12\" class=\"meta right\">Location Code &amp; Name: __________________________</td></tr>")
-    sb.append("<tr><td colspan=\"17\" class=\"title\">Subcenter Traceability Log Sheet</td></tr>")
-    sb.append("<tr><td colspan=\"5\" class=\"meta\">Supplier Code: <b>${state.supplierCode}</b></td><td colspan=\"7\" class=\"meta\">Supplier Name: <b>${state.supplierName}</b></td><td colspan=\"5\" class=\"meta right\">Source Type: <b>${state.sourceType}</b></td></tr>")
-    sb.append("<tr><td colspan=\"5\" class=\"meta\">Village Name: <b>${state.villageName}</b></td><td colspan=\"12\" class=\"meta\">Telephone Number: __________________________</td></tr>")
+    sb.append("<tr><td colspan=\"6\" class=\"brand\">Nestlé Pakistan Ltd.<br><span class=\"sub\">(Milk Collection &amp; Dairy Development)</span></td><td colspan=\"13\" class=\"right\" style=\"border:0!important;vertical-align:top\">$nestleSvg</td></tr>")
+    sb.append("<tr><td colspan=\"6\" class=\"meta\">Document #: 1583-CAM-D4-13.00</td><td colspan=\"13\" class=\"meta right\">Location Code &amp; Name: __________________________</td></tr>")
+    sb.append("<tr><td colspan=\"19\" class=\"title\">Subcenter Traceability Log Sheet</td></tr>")
+    sb.append("<tr><td colspan=\"6\" class=\"meta\">Supplier Code: <b>${state.supplierCode.ifBlank { "00S923" }}</b></td><td colspan=\"7\" class=\"meta\">Supplier Name: <b>${state.supplierName.ifBlank { "Nadeem Tariq" }}</b></td><td colspan=\"6\" class=\"meta right\">Source Type: <b>${state.sourceType.ifBlank { "DO" }}</b></td></tr>")
+    sb.append("<tr><td colspan=\"6\" class=\"meta\">Village Name: <b>${state.villageName}</b></td><td colspan=\"13\" class=\"meta\">Telephone Number: __________________________</td></tr>")
 
-    sb.append("<tr><th>Sr #</th><th>Farmer Name</th><th>Village</th>")
+    sb.append("<tr><th style=\"width:3.2%\">Sr #</th><th style=\"width:16%\">Farmer Name</th><th style=\"width:5.5%\">Village</th>")
     TraceabilityEngine.TRACE_MONTHS.forEach { m ->
-        sb.append("<th>$m</th>")
+        sb.append("<th style=\"width:4.8%\">$m</th>")
         if (TraceabilityEngine.VERIFICATION_MONTHS.contains(m)) {
-            sb.append("<th>AASM<br>Verify</th>")
+            sb.append("<th style=\"width:4.6%\">AASM<br>Verify</th>")
         }
     }
     sb.append("</tr>")
@@ -1097,6 +1311,8 @@ fun generateTraceHtml(state: com.example.ui.TraceSheetUiState): String {
             sb.append("<td class=\"total\"></td>")
         }
     }
-    sb.append("</tr></table></body></html>")
+    sb.append("</tr></table>")
+    sb.append("<div style=\"text-align:center;font-size:7px;color:#475569;margin-top:2px;font-family:Arial,sans-serif\">Subcenter Traceability Log Sheet</div>")
+    sb.append("</body></html>")
     return sb.toString()
 }

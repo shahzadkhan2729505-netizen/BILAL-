@@ -8,6 +8,7 @@ import com.example.calculator.CalculatorState
 import com.example.data.AppDatabase
 import com.example.data.MilkRepository
 import com.example.data.model.Farmer
+import com.example.data.model.FarmerWeeklyHistory
 import com.example.data.model.MilkCalculations
 import com.example.data.model.MilkRecord
 import com.example.data.model.MonthConfig
@@ -15,12 +16,16 @@ import com.example.data.model.REFERENCE_TS
 import com.example.data.model.TraceRowEntity
 import com.example.data.model.TraceSheetConfig
 import com.example.traceability.TraceabilityEngine
+import com.example.util.WeekDateUtils
+import com.example.util.WeekInfo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -39,6 +44,21 @@ data class DashboardKpis(
     val averageLr: Double = 0.0,
     val averageTs: Double = 0.0
 )
+
+data class WeeklySummaryCalculations(
+    val totalVolume: Double = 0.0,
+    val averageFat: Double = 0.0,
+    val averageLr: Double = 0.0,
+    val averageTs: Double = 0.0,
+    val totalPayment: Double = 0.0,
+    val entryCount: Int = 0
+) {
+    fun formattedTotalVolume(): String = String.format(Locale.US, "%.2f Litres", totalVolume)
+    fun formattedAverageFat(): String = String.format(Locale.US, "%.2f%%", averageFat)
+    fun formattedAverageLr(): String = String.format(Locale.US, "%.1f", averageLr)
+    fun formattedAverageTs(): String = String.format(Locale.US, "%.2f%%", averageTs)
+    fun formattedTotalPayment(): String = String.format(Locale.US, "Rs %,.0f", totalPayment)
+}
 
 data class MilkEntryFormState(
     val selectedFarmerId: String = "",
@@ -61,14 +81,18 @@ data class TraceRowUi(
 data class TraceSheetUiState(
     val supplierCode: String = "",
     val supplierName: String = "",
-    val sourceType: String = "DO",
+    val sourceType: String = "",
     val villageName: String = "",
+    val telephoneNumber: String = "",
+    val locationCode: String = "",
     val farmerNameHint: String = "",
     val isAutoMode: Boolean = true,
-    val selectedMonths: Set<String> = setOf("Sep"),
-    val monthConfigs: Map<String, MonthConfig> = mapOf("Sep" to MonthConfig(20, 45.0)),
-    val rows: List<TraceRowUi> = List(70) { TraceRowUi(it + 1) },
-    val statusMessage: String = "Ready. Select one or more months and set each month's farmer count and Max KGs/Litres.",
+    val selectedMonths: Set<String> = emptySet(),
+    val monthConfigs: Map<String, MonthConfig> = emptyMap(),
+    val rows: List<TraceRowUi> = List(70) { TraceRowUi(it + 1, "", emptyMap()) },
+    val loadedDocumentName: String = "Subcenter_Traceability_Log_Sheet.xlsx",
+    val isCustomUploaded: Boolean = false,
+    val statusMessage: String = "Ready. All cells are clean and empty. Tap any cell or talk to AI Assistant.",
     val isSuccessStatus: Boolean = false,
     val isWarningStatus: Boolean = false,
     val isAiLoading: Boolean = false
@@ -79,7 +103,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val repository = MilkRepository(
         database.farmerDao(),
         database.milkRecordDao(),
-        database.traceSheetDao()
+        database.traceSheetDao(),
+        database.farmerWeeklyHistoryDao()
     )
 
     val farmers: StateFlow<List<Farmer>> = repository.allFarmers.stateIn(
@@ -166,6 +191,180 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _userMessage = MutableStateFlow<String?>(null)
     val userMessage: StateFlow<String?> = _userMessage.asStateFlow()
 
+    // ================== FARMER WEEKLY ENTRY & HISTORY ==================
+    private val _selectedWeeklyFarmerId = MutableStateFlow<String?>(null)
+    val selectedWeeklyFarmerId: StateFlow<String?> = _selectedWeeklyFarmerId.asStateFlow()
+
+    val selectedWeeklyFarmer: StateFlow<Farmer?> = combine(farmers, _selectedWeeklyFarmerId) { fList, id ->
+        fList.find { it.id == id }
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = null
+    )
+
+    // Current week info (Monday -> Sunday)
+    private val _currentWeekInfo = MutableStateFlow(WeekDateUtils.getWeekInfoForDate())
+    val currentWeekInfo: StateFlow<WeekInfo> = _currentWeekInfo.asStateFlow()
+
+    // Records for the selected farmer specifically
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    val selectedFarmerAllRecords: StateFlow<List<MilkRecord>> = _selectedWeeklyFarmerId.flatMapLatest { id ->
+        if (id.isNullOrBlank()) flowOf(emptyList())
+        else repository.getRecordsByFarmer(id)
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = emptyList()
+    )
+
+    // Current Monday-to-Sunday entries for the selected farmer
+    val currentWeeklyEntries: StateFlow<List<MilkRecord>> = combine(
+        selectedFarmerAllRecords,
+        _currentWeekInfo
+    ) { records, week ->
+        records.filter { r ->
+            WeekDateUtils.isDateInWeek(r.date, week.mondayDate, week.sundayDate)
+        }.sortedWith(compareBy({ it.date }, { it.id }))
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = emptyList()
+    )
+
+    // Weekly calculations for current week
+    val currentWeeklySummary: StateFlow<WeeklySummaryCalculations> = currentWeeklyEntries.map { list ->
+        if (list.isEmpty()) {
+            WeeklySummaryCalculations()
+        } else {
+            val totalVol = list.sumOf { it.liters }
+            val avgFat = list.map { it.fat }.average()
+            val avgLr = list.map { it.lr }.average()
+            val avgTs = list.map { it.ts }.average()
+            val totalPay = list.sumOf { it.payment }
+            WeeklySummaryCalculations(
+                totalVolume = totalVol,
+                averageFat = avgFat,
+                averageLr = avgLr,
+                averageTs = avgTs,
+                totalPayment = totalPay,
+                entryCount = list.size
+            )
+        }
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = WeeklySummaryCalculations()
+    )
+
+    // Weekly History for the selected farmer (completed past weeks)
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    val selectedFarmerWeeklyHistory: StateFlow<List<FarmerWeeklyHistory>> = _selectedWeeklyFarmerId.flatMapLatest { id ->
+        if (id.isNullOrBlank()) flowOf(emptyList())
+        else repository.getWeeklyHistoryForFarmer(id)
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = emptyList()
+    )
+
+    fun selectFarmerForWeekly(farmerId: String) {
+        _selectedWeeklyFarmerId.value = farmerId
+        // Refresh week info to current system clock date
+        _currentWeekInfo.value = WeekDateUtils.getWeekInfoForDate()
+        // Auto check & archive any completed previous week records for this farmer
+        checkAndArchiveCompletedWeeksForFarmer(farmerId)
+    }
+
+    fun clearWeeklyFarmerSelection() {
+        _selectedWeeklyFarmerId.value = null
+    }
+
+    /**
+     * Checks if any previous weeks have ended and permanently saves their summary into Weekly History.
+     * Prevents overwriting and maintains individual farmer weekly separation.
+     */
+    fun checkAndArchiveCompletedWeeksForFarmer(farmerId: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val f = database.farmerDao().getFarmerById(farmerId) ?: return@launch
+            val curWeek = WeekDateUtils.getWeekInfoForDate()
+            val allFarmerRecords = database.milkRecordDao().getRecordListByFarmer(farmerId)
+            if (allFarmerRecords.isEmpty()) return@launch
+
+            // Group records strictly by Monday-to-Sunday week
+            val weeksMap = mutableMapOf<Pair<Int, Int>, Pair<WeekInfo, MutableList<MilkRecord>>>()
+            for (rec in allFarmerRecords) {
+                val wInfo = WeekDateUtils.getWeekInfoForDate(rec.date)
+                // If this is the current week, it stays active in Current Week list!
+                if (wInfo.year == curWeek.year && wInfo.weekNumber == curWeek.weekNumber) {
+                    continue
+                }
+                // Otherwise it is a completed past week: ensure it's in Weekly History
+                val key = Pair(wInfo.year, wInfo.weekNumber)
+                val entry = weeksMap.getOrPut(key) { Pair(wInfo, mutableListOf()) }
+                entry.second.add(rec)
+            }
+
+            for ((key, pair) in weeksMap) {
+                val (year, weekNum) = key
+                val (wInfo, recs) = pair
+                val existingHistory = repository.getSpecificWeeklyHistory(farmerId, year, weekNum)
+                if (existingHistory == null && recs.isNotEmpty()) {
+                    val totalVol = recs.sumOf { it.liters }
+                    val avgFat = recs.map { it.fat }.average()
+                    val avgLr = recs.map { it.lr }.average()
+                    val avgTs = recs.map { it.ts }.average()
+                    val totalPay = recs.sumOf { it.payment }
+
+                    val history = FarmerWeeklyHistory(
+                        farmerId = farmerId,
+                        farmerName = f.name,
+                        year = year,
+                        weekNumber = weekNum,
+                        weekStartDate = wInfo.mondayDate,
+                        weekEndDate = wInfo.sundayDate,
+                        totalVolume = totalVol,
+                        averageFat = avgFat,
+                        averageLr = avgLr,
+                        averageTs = avgTs,
+                        totalPayment = totalPay,
+                        entryCount = recs.size
+                    )
+                    repository.saveWeeklyHistory(history)
+                }
+            }
+        }
+    }
+
+    /**
+     * Explicitly commits/archives a completed weekly summary into permanent Weekly History
+     */
+    fun saveWeeklySummaryToHistory(
+        farmer: Farmer,
+        weekInfo: WeekInfo,
+        summary: WeeklySummaryCalculations
+    ) {
+        if (summary.entryCount == 0) return
+        viewModelScope.launch(Dispatchers.IO) {
+            val history = FarmerWeeklyHistory(
+                farmerId = farmer.id,
+                farmerName = farmer.name,
+                year = weekInfo.year,
+                weekNumber = weekInfo.weekNumber,
+                weekStartDate = weekInfo.mondayDate,
+                weekEndDate = weekInfo.sundayDate,
+                totalVolume = summary.totalVolume,
+                averageFat = summary.averageFat,
+                averageLr = summary.averageLr,
+                averageTs = summary.averageTs,
+                totalPayment = summary.totalPayment,
+                entryCount = summary.entryCount
+            )
+            repository.saveWeeklyHistory(history)
+            _userMessage.value = "Week ${weekInfo.weekNumber} summary saved into Weekly History."
+        }
+    }
+
     init {
         loadTraceSheetFromDb()
     }
@@ -179,8 +378,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun saveFarmer(id: String, name: String, mobile: String, village: String, defaultRate: Double, onSuccess: () -> Unit) {
         val cleanId = id.trim()
         val cleanName = name.trim()
+        val cleanMobile = mobile.trim()
         if (cleanId.isEmpty() || cleanName.isEmpty()) {
             _userMessage.value = "Please enter Farmer ID and Name."
+            return
+        }
+        if (cleanMobile.isEmpty()) {
+            _userMessage.value = "Farmer WhatsApp number is required."
             return
         }
         viewModelScope.launch(Dispatchers.IO) {
@@ -188,7 +392,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val farmer = Farmer(
                 id = cleanId,
                 name = cleanName,
-                mobile = mobile.trim(),
+                mobile = cleanMobile,
                 village = village.trim(),
                 defaultRate = if (defaultRate > 0) defaultRate else 200.0
             )
@@ -258,7 +462,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _entryFormState.value = _entryFormState.value.copy(calculations = calc)
     }
 
-    fun saveMilkEntry(onSuccess: () -> Unit) {
+    fun saveMilkEntry(onSuccess: (savedRecord: MilkRecord, farmer: Farmer) -> Unit) {
         val current = _entryFormState.value
         val farmer = farmers.value.find { it.id == current.selectedFarmerId }
         if (farmer == null) {
@@ -298,13 +502,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         )
 
         viewModelScope.launch(Dispatchers.IO) {
-            if (current.editingRecordId != null) {
+            val insertedId = if (current.editingRecordId != null) {
                 repository.updateRecord(record)
                 _userMessage.value = "Milk record updated successfully."
+                record.id
             } else {
-                repository.insertRecord(record)
+                val newId = repository.insertRecord(record)
                 _userMessage.value = "Milk entry saved successfully."
+                newId
             }
+            val finalRecord = record.copy(id = insertedId)
             // Reset input fields while keeping date & farmer
             _entryFormState.value = _entryFormState.value.copy(
                 litersText = "",
@@ -314,7 +521,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 editingRecordId = null
             )
             recomputeEntryCalculations()
-            viewModelScope.launch(Dispatchers.Main) { onSuccess() }
+            viewModelScope.launch(Dispatchers.Main) { onSuccess(finalRecord, farmer) }
         }
     }
 
@@ -621,6 +828,82 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _userMessage.value = "Traceability sheet edits saved."
     }
 
+    /**
+     * Replaces existing Excel / Traceability sheet with imported file data.
+     */
+    fun replaceTraceSheetData(
+        newSupplierCode: String? = null,
+        newSupplierName: String? = null,
+        newVillageName: String? = null,
+        newRows: List<TraceRowUi>,
+        sourceFileName: String = "Uploaded File"
+    ) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val state = _traceState.value
+            val finalRows = if (newRows.isNotEmpty()) {
+                newRows.mapIndexed { idx, r -> r.copy(sr = idx + 1) }
+            } else {
+                state.rows
+            }
+            _traceState.value = state.copy(
+                supplierCode = newSupplierCode ?: state.supplierCode,
+                supplierName = newSupplierName ?: state.supplierName,
+                villageName = newVillageName ?: state.villageName,
+                rows = finalRows,
+                loadedDocumentName = sourceFileName,
+                isCustomUploaded = true,
+                statusMessage = "✓ Sheet replaced with $sourceFileName (${finalRows.size} rows).",
+                isSuccessStatus = true,
+                isWarningStatus = false
+            )
+            saveTraceSheetToDb()
+            _userMessage.value = "Sheet replaced with $sourceFileName"
+        }
+    }
+
+    /**
+     * 100% Lifetime Free AI Auto-Balance for Excel sheet.
+     */
+    fun applyAiAutoBalance() {
+        viewModelScope.launch(Dispatchers.Default) {
+            val current = _traceState.value
+            val balanced = com.example.traceability.ExcelAiEngine.autoBalanceSheet(current)
+            _traceState.value = current.copy(
+                rows = balanced,
+                statusMessage = "✓ AI Auto-Balance applied. Outliers normalized.",
+                isSuccessStatus = true,
+                isWarningStatus = false
+            )
+            saveTraceSheetToDb()
+            _userMessage.value = "AI Auto-Balance completed."
+        }
+    }
+
+    /**
+     * 100% Lifetime Free AI Smart Complete for Excel sheet.
+     */
+    fun applyAiSmartComplete() {
+        viewModelScope.launch(Dispatchers.Default) {
+            val current = _traceState.value
+            val completed = com.example.traceability.ExcelAiEngine.smartCompleteMissing(current)
+            _traceState.value = current.copy(
+                rows = completed,
+                statusMessage = "✓ AI Smart Complete applied. Missing entries populated.",
+                isSuccessStatus = true,
+                isWarningStatus = false
+            )
+            saveTraceSheetToDb()
+            _userMessage.value = "AI Smart Complete finished."
+        }
+    }
+
+    /**
+     * Lifetime Free AI Audit of the Excel Sheet.
+     */
+    fun getAiAuditReport(): com.example.traceability.ExcelAiEngine.AiAuditReport {
+        return com.example.traceability.ExcelAiEngine.auditSheet(_traceState.value)
+    }
+
     private fun saveTraceSheetToDb() {
         val state = _traceState.value
         viewModelScope.launch(Dispatchers.IO) {
@@ -652,6 +935,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
             repository.saveTraceRows(rowEntities)
         }
+    }
+
+    fun executeAiCommand(command: String, onResponse: (String, String) -> Unit) {
+        val current = _traceState.value
+        val result = com.example.traceability.TraceabilityAiBrain.processCommand(command, current)
+        _traceState.value = result.updatedState
+        saveTraceSheetToDb()
+        onResponse(result.urduResponse, result.englishResponse)
+    }
+
+    fun clearAllSheetData() {
+        val emptyRows = List(70) { TraceRowUi(sr = it + 1, name = "", values = emptyMap()) }
+        _traceState.value = _traceState.value.copy(
+            rows = emptyRows,
+            statusMessage = "✓ پوری شیٹ صاف اور تمام 70 خانے بلینک کر دیے گئے ہیں۔",
+            isSuccessStatus = true,
+            isWarningStatus = false
+        )
+        saveTraceSheetToDb()
+        _userMessage.value = "Excel sheet completely cleared."
     }
 
     fun clearTraceSheet() {

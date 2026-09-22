@@ -15,7 +15,8 @@ data class UserProfile(
     val isGoogleAccount: Boolean = true,
     val avatarInitial: String = "B",
     val isProTrialActive: Boolean = true,
-    val trialDaysRemaining: Int = 14
+    val trialDaysRemaining: Int = 14,
+    val ownerWhatsApp: String = ""
 )
 
 class AuthManager private constructor(context: Context) {
@@ -44,6 +45,7 @@ class AuthManager private constructor(context: Context) {
         val role = prefs.getString("user_role", "Dairy Collection Center Admin") ?: "Dairy Collection Center Admin"
         val isPro = prefs.getBoolean("is_pro_trial", true)
         val initial = name.firstOrNull()?.uppercase() ?: "B"
+        val ownerWhatsApp = prefs.getString("owner_whatsapp", "") ?: ""
 
         return UserProfile(
             isLoggedIn = isLoggedIn,
@@ -54,8 +56,19 @@ class AuthManager private constructor(context: Context) {
             isGoogleAccount = true,
             avatarInitial = initial,
             isProTrialActive = isPro,
-            trialDaysRemaining = 14
+            trialDaysRemaining = 14,
+            ownerWhatsApp = ownerWhatsApp
         )
+    }
+
+    fun saveOwnerWhatsApp(number: String) {
+        val cleanNumber = number.trim()
+        prefs.edit().putString("owner_whatsapp", cleanNumber).apply()
+        _userProfile.value = _userProfile.value.copy(ownerWhatsApp = cleanNumber)
+    }
+
+    fun getOwnerWhatsApp(): String {
+        return prefs.getString("owner_whatsapp", "") ?: ""
     }
 
     fun signInWithGoogle(email: String, name: String) {

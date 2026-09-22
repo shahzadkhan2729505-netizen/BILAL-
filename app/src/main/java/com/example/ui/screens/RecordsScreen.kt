@@ -31,8 +31,11 @@ import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.WaterDrop
 import com.example.util.PdfGenerator
+import com.example.util.WhatsAppNotifier
+import com.example.ui.components.AppFormField
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -54,6 +57,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -85,6 +89,9 @@ fun RecordsScreen(
     val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
     val fromDate by viewModel.fromDate.collectAsStateWithLifecycle()
     val toDate by viewModel.toDate.collectAsStateWithLifecycle()
+    val farmersList by viewModel.farmers.collectAsStateWithLifecycle()
+    val authManager = remember { com.example.data.auth.AuthManager.getInstance(context) }
+    val userProfile by authManager.userProfile.collectAsStateWithLifecycle()
 
     var showClearAllDialog by remember { mutableStateOf(false) }
     var recordToDelete by remember { mutableStateOf<MilkRecord?>(null) }
@@ -193,22 +200,23 @@ fun RecordsScreen(
                     )
                     Spacer(modifier = Modifier.height(10.dp))
 
-                    OutlinedTextField(
+                    AppFormField(
+                        label = "SEARCH RECORDS",
                         value = searchQuery,
                         onValueChange = { viewModel.setSearchQuery(it) },
-                        placeholder = { Text("Search farmer name, ID, remarks...") },
-                        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                        placeholder = "Search farmer name, ID, remarks...",
                         trailingIcon = {
                             if (searchQuery.isNotEmpty()) {
                                 IconButton(onClick = { viewModel.setSearchQuery("") }) {
-                                    Icon(Icons.Default.Clear, contentDescription = "Clear")
+                                    Icon(Icons.Default.Clear, contentDescription = "Clear", tint = Color(0xFF64748B))
                                 }
+                            } else {
+                                Icon(Icons.Default.Search, contentDescription = null, tint = Color(0xFF64748B))
                             }
                         },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .testTag("record_search_field"),
-                        shape = RoundedCornerShape(10.dp)
+                            .testTag("record_search_field")
                     )
 
                     Spacer(modifier = Modifier.height(10.dp))
@@ -217,40 +225,38 @@ fun RecordsScreen(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        OutlinedTextField(
+                        AppFormField(
+                            label = "FROM DATE",
                             value = fromDate,
                             onValueChange = {},
                             readOnly = true,
-                            label = { Text("FROM DATE") },
-                            placeholder = { Text("YYYY-MM-DD") },
+                            placeholder = "YYYY-MM-DD",
+                            onClick = { fromDatePicker.show() },
                             trailingIcon = {
                                 IconButton(onClick = { fromDatePicker.show() }) {
-                                    Icon(Icons.Default.CalendarToday, contentDescription = "Pick From Date", modifier = Modifier.size(18.dp))
+                                    Icon(Icons.Default.CalendarToday, contentDescription = "Pick From Date", tint = MilkBlue, modifier = Modifier.size(18.dp))
                                 }
                             },
                             modifier = Modifier
                                 .weight(1f)
-                                .clickable { fromDatePicker.show() }
-                                .testTag("from_date_filter"),
-                            shape = RoundedCornerShape(10.dp)
+                                .testTag("from_date_filter")
                         )
 
-                        OutlinedTextField(
+                        AppFormField(
+                            label = "TO DATE",
                             value = toDate,
                             onValueChange = {},
                             readOnly = true,
-                            label = { Text("TO DATE") },
-                            placeholder = { Text("YYYY-MM-DD") },
+                            placeholder = "YYYY-MM-DD",
+                            onClick = { toDatePicker.show() },
                             trailingIcon = {
                                 IconButton(onClick = { toDatePicker.show() }) {
-                                    Icon(Icons.Default.CalendarToday, contentDescription = "Pick To Date", modifier = Modifier.size(18.dp))
+                                    Icon(Icons.Default.CalendarToday, contentDescription = "Pick To Date", tint = MilkBlue, modifier = Modifier.size(18.dp))
                                 }
                             },
                             modifier = Modifier
                                 .weight(1f)
-                                .clickable { toDatePicker.show() }
-                                .testTag("to_date_filter"),
-                            shape = RoundedCornerShape(10.dp)
+                                .testTag("to_date_filter")
                         )
                     }
 
@@ -343,8 +349,11 @@ fun RecordsScreen(
             }
         } else {
             items(records, key = { it.id }) { record ->
+                val farmer = farmersList.find { it.id == record.farmerId }
                 MilkRecordCard(
                     record = record,
+                    farmerMobile = farmer?.mobile.orEmpty(),
+                    ownerWhatsApp = userProfile.ownerWhatsApp,
                     onEdit = { onNavigateToEditRecord(record) },
                     onDelete = { recordToDelete = record }
                 )
@@ -356,6 +365,8 @@ fun RecordsScreen(
 @Composable
 fun MilkRecordCard(
     record: MilkRecord,
+    farmerMobile: String = "",
+    ownerWhatsApp: String = "",
     onEdit: () -> Unit,
     onDelete: () -> Unit
 ) {
@@ -492,6 +503,25 @@ fun MilkRecordCard(
 
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     val cardContext = androidx.compose.ui.platform.LocalContext.current
+                    IconButton(
+                        onClick = {
+                            val msg = WhatsAppNotifier.buildMilkEntryMessage(
+                                record = record,
+                                farmerMobile = farmerMobile,
+                                ownerWhatsApp = ownerWhatsApp
+                            )
+                            WhatsAppNotifier.sendWhatsAppMessage(cardContext, farmerMobile, msg)
+                        },
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Send,
+                            contentDescription = "Send WhatsApp",
+                            tint = Color(0xFF2E7D32),
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(2.dp))
                     IconButton(
                         onClick = { PdfGenerator.downloadSingleSlipPdf(cardContext, record) },
                         modifier = Modifier.size(32.dp)

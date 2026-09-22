@@ -268,6 +268,59 @@ object PdfGenerator {
         return uri
     }
 
+    private fun drawNestleLogo(canvas: Canvas, x: Float, y: Float, width: Float, height: Float) {
+        val darkColor = Color.rgb(30, 41, 59)
+        val fillPaint = Paint().apply {
+            color = darkColor
+            style = Paint.Style.FILL
+            isAntiAlias = true
+        }
+        val strokePaint = Paint().apply {
+            color = darkColor
+            style = Paint.Style.STROKE
+            strokeWidth = 1.4f
+            isAntiAlias = true
+        }
+
+        // Branch
+        canvas.drawLine(x + 2f, y + height * 0.76f, x + width * 0.36f, y + height * 0.74f, strokePaint.apply { strokeWidth = 2.2f })
+
+        // Nest bowl
+        val nestRect = RectF(x + 6f, y + height * 0.44f, x + width * 0.34f, y + height * 0.78f)
+        canvas.drawArc(nestRect, 0f, 180f, true, fillPaint)
+
+        // Mother Bird Body & Head
+        canvas.drawCircle(x + 11f, y + height * 0.34f, 3.4f, fillPaint)
+        canvas.drawCircle(x + 16f, y + height * 0.42f, 4.2f, fillPaint)
+        // Mother Bird Beak
+        val beakPath = android.graphics.Path().apply {
+            moveTo(x + 14f, y + height * 0.34f)
+            lineTo(x + 19f, y + height * 0.36f)
+            lineTo(x + 14f, y + height * 0.38f)
+            close()
+        }
+        canvas.drawPath(beakPath, fillPaint)
+
+        // Baby Birds in Nest (3 hungry fledglings)
+        canvas.drawCircle(x + 21f, y + height * 0.45f, 2.2f, fillPaint)
+        canvas.drawCircle(x + 24.5f, y + height * 0.43f, 2.2f, fillPaint)
+        canvas.drawCircle(x + 28f, y + height * 0.45f, 2.2f, fillPaint)
+
+        // "Nestlé" typography
+        val textPaint = Paint().apply {
+            color = darkColor
+            typeface = Typeface.create(Typeface.SERIF, Typeface.BOLD)
+            textSize = height * 0.65f
+            isAntiAlias = true
+        }
+        val wordX = x + width * 0.40f
+        val wordY = y + height * 0.68f
+        canvas.drawText("Nestlé", wordX, wordY, textPaint)
+
+        // Famous Nestle Top Horizontal Bar (from N across to é)
+        canvas.drawRect(wordX - 1f, y + height * 0.12f, wordX + width * 0.58f, y + height * 0.18f, fillPaint)
+    }
+
     /**
      * Generates and downloads the Subcenter Traceability Log Sheet PDF (A4 Landscape, 70 rows).
      */
@@ -300,7 +353,7 @@ object PdfGenerator {
 
         val titlePaint = Paint().apply {
             color = Color.BLACK
-            textSize = 14f
+            textSize = 13.5f
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
             textAlign = Paint.Align.CENTER
             isAntiAlias = true
@@ -308,28 +361,14 @@ object PdfGenerator {
 
         val metaPaint = Paint().apply {
             color = Color.BLACK
-            textSize = 8.5f
+            textSize = 8f
             isAntiAlias = true
         }
 
         val metaBoldPaint = Paint().apply {
             color = Color.BLACK
-            textSize = 8.5f
+            textSize = 8f
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-            isAntiAlias = true
-        }
-
-        val cellPaint = Paint().apply {
-            color = Color.BLACK
-            textSize = 6.5f
-            textAlign = Paint.Align.CENTER
-            isAntiAlias = true
-        }
-
-        val cellLeftPaint = Paint().apply {
-            color = Color.BLACK
-            textSize = 6.5f
-            textAlign = Paint.Align.LEFT
             isAntiAlias = true
         }
 
@@ -352,76 +391,82 @@ object PdfGenerator {
             style = Paint.Style.FILL
         }
 
-        var y = 24f
+        var y = 20f
 
         // Top Header
         canvas.drawText("Nestlé Pakistan Ltd.", 20f, y, brandPaint)
-        y += 10f
+        y += 9f
         canvas.drawText("(Milk Collection & Dairy Development)", 20f, y, subBrandPaint)
 
-        canvas.drawText("Document #: 1583-CAM-D4-13.00", 20f, y + 12f, metaPaint)
-        canvas.drawText("Location Code & Name: _________________________________", pageWidth - 320f, y + 12f, metaPaint)
-        y += 24f
+        // Draw Official Nestlé Logo on Top Right
+        drawNestleLogo(canvas, pageWidth - 150f, 10f, 130f, 26f)
+
+        canvas.drawText("Document #: 1583-CAM-D4-13.00", 20f, y + 10f, metaPaint)
+        canvas.drawText("Location Code & Name: _________________________________", pageWidth - 320f, y + 10f, metaPaint)
+        y += 20f
 
         // Center Title Bar
-        val titleBarRect = RectF(20f, y - 11f, pageWidth - 20f, y + 6f)
+        val titleBarRect = RectF(20f, y - 10f, pageWidth - 20f, y + 6f)
         canvas.drawRect(titleBarRect, thBgPaint)
         canvas.drawRect(titleBarRect, linePaint)
         canvas.drawText("Subcenter Traceability Log Sheet", pageWidth / 2f, y + 2f, titlePaint)
-        y += 16f
+        y += 14f
 
         // Metadata row 1
         canvas.drawText("Supplier Code: ", 20f, y, metaPaint)
-        canvas.drawText(state.supplierCode, 82f, y, metaBoldPaint)
+        canvas.drawText(state.supplierCode.ifBlank { "________________" }, 82f, y, metaBoldPaint)
 
         canvas.drawText("Supplier Name: ", 220f, y, metaPaint)
-        canvas.drawText(state.supplierName, 285f, y, metaBoldPaint)
+        canvas.drawText(state.supplierName.ifBlank { "____________________________" }, 285f, y, metaBoldPaint)
 
         canvas.drawText("Source Type: ", pageWidth - 160f, y, metaPaint)
-        canvas.drawText(state.sourceType, pageWidth - 100f, y, metaBoldPaint)
-        y += 11f
+        canvas.drawText(state.sourceType.ifBlank { "________" }, pageWidth - 100f, y, metaBoldPaint)
+        y += 10f
 
         // Metadata row 2
         canvas.drawText("Village Name: ", 20f, y, metaPaint)
-        canvas.drawText(state.villageName, 80f, y, metaBoldPaint)
+        canvas.drawText(state.villageName.ifBlank { "________________" }, 80f, y, metaBoldPaint)
 
-        canvas.drawText("Telephone Number: ____________________________", 220f, y, metaPaint)
-        y += 14f
+        canvas.drawText("Telephone Number: ${state.telephoneNumber.ifBlank { "____________________________" }}", 220f, y, metaPaint)
+        y += 13f
 
-        // Table Geometry
-        // Widths: Sr (22), Farmer (115), Village (45), 12 Months (28 each = 336), 4 Verify (28 each = 112) -> Total = 630 points
+        // Table Geometry (Exact 802.0 pt total width across 842 pt page, margins 20pt left and right)
         val left = 20f
-        val srW = 22f
-        val nameW = 110f
-        val villageW = 40f
-        val monthW = 38f
-        val verW = 36f
+        val right = pageWidth - 20f // 822f
+        val srW = 24f
+        val nameW = 130f
+        val villageW = 44f
+        val monthW = 38f // 12 * 38 = 456f
+        val verW = 37f // 4 * 37 = 148f
+        // Total: 24 + 130 + 44 + 456 + 148 = 802f (Exactly right - left!)
 
         // Header Row
-        val headerH = 16f
-        canvas.drawRect(left, y, pageWidth - 20f, y + headerH, thBgPaint)
-        canvas.drawRect(left, y, pageWidth - 20f, y + headerH, linePaint)
+        val headerH = 15f
+        canvas.drawRect(left, y, right, y + headerH, thBgPaint)
+        canvas.drawRect(left, y, right, y + headerH, linePaint)
 
         var curX = left
-        canvas.drawText("Sr #", curX + srW / 2f, y + 11f, thPaint)
+        canvas.drawText("Sr #", curX + srW / 2f, y + 10.5f, thPaint)
         canvas.drawLine(curX + srW, y, curX + srW, y + headerH, linePaint)
         curX += srW
 
-        canvas.drawText("Farmer Name", curX + nameW / 2f, y + 11f, thPaint)
+        canvas.drawText("Farmer Name", curX + nameW / 2f, y + 10.5f, thPaint)
         canvas.drawLine(curX + nameW, y, curX + nameW, y + headerH, linePaint)
         curX += nameW
 
-        canvas.drawText("Village", curX + villageW / 2f, y + 11f, thPaint)
+        canvas.drawText("Village", curX + villageW / 2f, y + 10.5f, thPaint)
         canvas.drawLine(curX + villageW, y, curX + villageW, y + headerH, linePaint)
         curX += villageW
 
         TraceabilityEngine.TRACE_MONTHS.forEach { m ->
-            canvas.drawText(m, curX + monthW / 2f, y + 11f, thPaint)
+            canvas.drawText(m, curX + monthW / 2f, y + 10.5f, thPaint)
             canvas.drawLine(curX + monthW, y, curX + monthW, y + headerH, linePaint)
             curX += monthW
 
             if (TraceabilityEngine.VERIFICATION_MONTHS.contains(m)) {
-                canvas.drawText("AASM", curX + verW / 2f, y + 11f, thPaint)
+                canvas.drawText("AASM", curX + verW / 2f, y + 7f, thPaint)
+                canvas.drawText("Verify", curX + verW / 2f, y + 13.5f, thPaint.apply { textSize = 5.5f })
+                thPaint.textSize = 7f
                 canvas.drawLine(curX + verW, y, curX + verW, y + headerH, linePaint)
                 curX += verW
             }
@@ -430,13 +475,13 @@ object PdfGenerator {
         y += headerH
 
         // Strict Single A4 Page Guarantee: calculate row height to fit exactly within page bounds
-        val totalH = 12f
-        val footerH = 14f
-        val bottomMargin = 8f
+        val totalH = 13f
+        val footerH = 12f
+        val bottomMargin = 6f
         val availableForRows = pageHeight - y - totalH - footerH - bottomMargin
         val rowCount = state.rows.size.coerceAtLeast(1)
-        val rowH = (availableForRows / rowCount).coerceIn(3.8f, 7.5f)
-        val dynamicFontSize = (rowH * 0.72f).coerceIn(4.8f, 6.8f)
+        val rowH = (availableForRows / rowCount).coerceIn(4.2f, 10.5f)
+        val dynamicFontSize = (rowH * 0.70f).coerceIn(5.0f, 7.8f)
 
         val dynamicCellPaint = Paint().apply {
             color = Color.BLACK
@@ -460,9 +505,9 @@ object PdfGenerator {
 
             if (i % 2 == 1) {
                 val rowAltBg = Paint().apply { color = Color.rgb(248, 250, 252); style = Paint.Style.FILL }
-                canvas.drawRect(left, rowTop, pageWidth - 20f, rowBottom, rowAltBg)
+                canvas.drawRect(left, rowTop, right, rowBottom, rowAltBg)
             }
-            canvas.drawRect(left, rowTop, pageWidth - 20f, rowBottom, linePaint)
+            canvas.drawRect(left, rowTop, right, rowBottom, linePaint)
 
             var rx = left
             // Sr #
@@ -471,8 +516,8 @@ object PdfGenerator {
             rx += srW
 
             // Farmer Name
-            val nameDisplay = if (row.name.length > 20) row.name.substring(0, 20) else row.name
-            canvas.drawText(nameDisplay, rx + 2f, rowTop + textBaselineOffset, dynamicCellLeftPaint)
+            val nameDisplay = if (row.name.length > 24) row.name.substring(0, 24) else row.name
+            canvas.drawText(nameDisplay, rx + 3f, rowTop + textBaselineOffset, dynamicCellLeftPaint)
             canvas.drawLine(rx + nameW, rowTop, rx + nameW, rowBottom, linePaint)
             rx += nameW
 
@@ -500,12 +545,12 @@ object PdfGenerator {
         }
 
         // Total Row
-        canvas.drawRect(left, y, pageWidth - 20f, y + totalH, thBgPaint)
-        canvas.drawRect(left, y, pageWidth - 20f, y + totalH, linePaint)
+        canvas.drawRect(left, y, right, y + totalH, thBgPaint)
+        canvas.drawRect(left, y, right, y + totalH, linePaint)
 
         var tx = left
         val totalLabelW = srW + nameW + villageW
-        canvas.drawText("Total", tx + totalLabelW / 2f, y + 9f, thPaint)
+        canvas.drawText("Total", tx + totalLabelW / 2f, y + 9.5f, thPaint)
         canvas.drawLine(tx + totalLabelW, y, tx + totalLabelW, y + totalH, linePaint)
         tx += totalLabelW
 
@@ -513,7 +558,7 @@ object PdfGenerator {
             val total = state.rows.sumOf { it.values[m] ?: 0.0 }
             val s = if (total > 0) TraceabilityEngine.formatNumber(total) else ""
             if (s.isNotEmpty()) {
-                canvas.drawText(s, tx + monthW / 2f, y + 9f, thPaint)
+                canvas.drawText(s, tx + monthW / 2f, y + 9.5f, thPaint)
             }
             canvas.drawLine(tx + monthW, y, tx + monthW, y + totalH, linePaint)
             tx += monthW
@@ -524,13 +569,14 @@ object PdfGenerator {
             }
         }
 
-        // 1-Page A4 Guarantee Footer
+        // 1-Page A4 Guarantee Footer (Centered title matching official print layout)
         val footerPaint = Paint().apply {
-            color = Color.rgb(100, 116, 139)
-            textSize = 6.5f
+            color = Color.rgb(71, 85, 105)
+            textSize = 7f
+            textAlign = Paint.Align.CENTER
             isAntiAlias = true
         }
-        canvas.drawText("Page 1 of 1 • Strict 1-Page A4 Sheet Layout (Fit to 1 Page Wide by 1 Page Tall) • Bilal Ahmad Milk Collection", left, pageHeight - 8f, footerPaint)
+        canvas.drawText("Subcenter Traceability Log Sheet", pageWidth / 2f, pageHeight - 6f, footerPaint)
 
         document.finishPage(page)
 

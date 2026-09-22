@@ -2,9 +2,11 @@ package com.example.data
 
 import android.content.Context
 import com.example.data.dao.FarmerDao
+import com.example.data.dao.FarmerWeeklyHistoryDao
 import com.example.data.dao.MilkRecordDao
 import com.example.data.dao.TraceSheetDao
 import com.example.data.model.Farmer
+import com.example.data.model.FarmerWeeklyHistory
 import com.example.data.model.MilkRecord
 import com.example.data.model.MonthConfig
 import com.example.data.model.TraceRowEntity
@@ -20,12 +22,20 @@ import java.util.Locale
 class MilkRepository(
     private val farmerDao: FarmerDao,
     private val milkRecordDao: MilkRecordDao,
-    private val traceSheetDao: TraceSheetDao
+    private val traceSheetDao: TraceSheetDao,
+    private val weeklyHistoryDao: FarmerWeeklyHistoryDao
 ) {
     val allFarmers: Flow<List<Farmer>> = farmerDao.getAllFarmers()
     val allRecords: Flow<List<MilkRecord>> = milkRecordDao.getAllRecords()
     val traceConfig: Flow<TraceSheetConfig?> = traceSheetDao.getConfig()
     val traceRows: Flow<List<TraceRowEntity>> = traceSheetDao.getAllRows()
+
+    fun getRecordsByFarmer(farmerId: String): Flow<List<MilkRecord>> = milkRecordDao.getRecordsByFarmer(farmerId)
+    fun getWeeklyHistoryForFarmer(farmerId: String): Flow<List<FarmerWeeklyHistory>> = weeklyHistoryDao.getHistoryForFarmer(farmerId)
+
+    suspend fun saveWeeklyHistory(history: FarmerWeeklyHistory): Long = weeklyHistoryDao.insertWeeklyHistory(history)
+    suspend fun getSpecificWeeklyHistory(farmerId: String, year: Int, weekNumber: Int): FarmerWeeklyHistory? =
+        weeklyHistoryDao.getSpecificWeeklyHistory(farmerId, year, weekNumber)
 
     suspend fun insertFarmer(farmer: Farmer) = farmerDao.insertFarmer(farmer)
     suspend fun updateFarmer(farmer: Farmer) = farmerDao.updateFarmer(farmer)

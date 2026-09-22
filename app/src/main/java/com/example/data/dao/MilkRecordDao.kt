@@ -17,6 +17,9 @@ interface MilkRecordDao {
     @Query("SELECT * FROM milk_records WHERE farmerId = :farmerId ORDER BY date DESC")
     fun getRecordsByFarmer(farmerId: String): Flow<List<MilkRecord>>
 
+    @Query("SELECT * FROM milk_records WHERE farmerId = :farmerId ORDER BY date ASC")
+    suspend fun getRecordListByFarmer(farmerId: String): List<MilkRecord>
+
     @Query("SELECT * FROM milk_records WHERE id = :id LIMIT 1")
     suspend fun getRecordById(id: Long): MilkRecord?
 

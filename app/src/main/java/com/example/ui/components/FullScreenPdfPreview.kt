@@ -3,6 +3,7 @@ package com.example.ui.components
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
@@ -47,6 +48,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
+import com.example.R
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -120,7 +123,7 @@ fun FullScreenPdfPreviewDialog(
                                 }
                             }
                             Text(
-                                text = "Subcenter_Traceability_Log_Sheet_${traceState.supplierCode.ifBlank { "0S1055" }}.pdf",
+                                text = if (traceState.isCustomUploaded) traceState.loadedDocumentName else "Subcenter_Traceability_Log_Sheet_${traceState.supplierCode.ifBlank { "0S1055" }}.pdf",
                                 color = Color.White.copy(alpha = 0.7f),
                                 fontSize = 11.sp,
                                 maxLines = 1
@@ -219,7 +222,7 @@ fun FullScreenPdfPreviewDialog(
                                 .width(940.dp)
                                 .padding(16.dp)
                         ) {
-                            // Sheet Header
+                            // Sheet Header with Authentic Nestlé Logo
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -239,20 +242,12 @@ fun FullScreenPdfPreviewDialog(
                                         color = Color(0xFF475569)
                                     )
                                 }
-                                Column(horizontalAlignment = Alignment.End) {
-                                    Text(
-                                        text = "Subcenter Traceability Log Sheet",
-                                        fontSize = 13.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = Color(0xFF0F172A)
-                                    )
-                                    Text(
-                                        text = "Strict 1-Page A4 Sheet Layout",
-                                        fontSize = 9.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = MilkGreen
-                                    )
-                                }
+
+                                Image(
+                                    painter = painterResource(id = R.drawable.ic_nestle_logo),
+                                    contentDescription = "Nestlé Logo",
+                                    modifier = Modifier.height(36.dp).padding(end = 4.dp)
+                                )
                             }
 
                             Spacer(modifier = Modifier.height(4.dp))
@@ -261,25 +256,52 @@ fun FullScreenPdfPreviewDialog(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
-                                Text("Document #: 1583-CAM-D4-13.00", fontSize = 10.sp, color = Color(0xFF334155))
-                                Text("Location Code & Name: ___________________________", fontSize = 10.sp, color = Color(0xFF334155))
+                                Text("Document #: 1583-CAM-D4-13.00", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF334155))
+                                Text("Location Code & Name: ___________________________", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF334155))
                             }
 
                             Spacer(modifier = Modifier.height(6.dp))
 
-                            // Metadata Box
-                            Row(
+                            // Centered Shaded Title Banner matching photo exactly
+                            Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .background(Color(0xFFF1F5F9))
-                                    .border(0.5.dp, Color(0xFFCBD5E1))
-                                    .padding(horizontal = 8.dp, vertical = 5.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween
+                                    .background(Color(0xFFE2E8F0))
+                                    .border(1.dp, Color.Black)
+                                    .padding(vertical = 5.dp),
+                                contentAlignment = Alignment.Center
                             ) {
-                                Text("Supplier Code: ${traceState.supplierCode.ifBlank { "0S1055" }}", fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                                Text("Supplier Name: ${traceState.supplierName.ifBlank { "Bilal Ahmad" }}", fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                                Text("Village Name: ${traceState.villageName.ifBlank { "Chak 123" }}", fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                                Text("Source Type: ${traceState.sourceType}", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                Text(
+                                    text = "Subcenter Traceability Log Sheet",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.Black
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(6.dp))
+
+                            // Metadata Line 1
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("Supplier Code: ${traceState.supplierCode.ifBlank { "________________" }}", fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                                Text("Supplier Name: ${traceState.supplierName.ifBlank { "____________________________" }}", fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                                Text("Source Type: ${traceState.sourceType.ifBlank { "________" }}", fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                            }
+
+                            Spacer(modifier = Modifier.height(4.dp))
+
+                            // Metadata Line 2
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("Village Name: ${traceState.villageName.ifBlank { "________________" }}", fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                                Text("Telephone Number: ${traceState.telephoneNumber.ifBlank { "____________________________" }}", fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
                             }
 
                             Spacer(modifier = Modifier.height(8.dp))

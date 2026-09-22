@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -29,6 +30,7 @@ import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Calculate
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Dashboard
+import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.ListAlt
 import androidx.compose.material.icons.filled.People
@@ -81,6 +83,8 @@ import com.example.ui.screens.AiAdvisorScreen
 import com.example.ui.screens.AiSheetScreen
 import com.example.ui.screens.CalculatorScreen
 import com.example.ui.screens.DashboardScreen
+import com.example.ui.screens.FarmerMasterListScreen
+import com.example.ui.screens.FarmerWeeklyEntryScreen
 import com.example.ui.screens.FarmersScreen
 import com.example.ui.screens.MilkEntryScreen
 import com.example.ui.screens.RecordsScreen
@@ -92,11 +96,13 @@ import com.example.ui.theme.MilkGreen
 import com.example.ui.theme.MilkNavy
 import com.example.ui.theme.MilkSky
 import com.example.util.PdfGenerator
+import com.example.ui.components.AppFormField
 
 enum class AppScreen(val title: String, val icon: ImageVector) {
     Dashboard("Dashboard", Icons.Default.Dashboard),
     MilkEntry("Milk Entry", Icons.Default.AddCircle),
     Farmers("Farmers", Icons.Default.People),
+    Weekly("Weekly Entry", Icons.Default.DateRange),
     Records("Records", Icons.Default.ListAlt),
     Reports("Reports", Icons.Default.Assessment),
     Calculator("Calculator", Icons.Default.Calculate),
@@ -120,6 +126,8 @@ fun MilkApp(
     val userProfile by authManager.userProfile.collectAsStateWithLifecycle()
     var showAccountDialog by remember { mutableStateOf(false) }
 
+    val selectedWeeklyFarmerId by viewModel.selectedWeeklyFarmerId.collectAsStateWithLifecycle()
+
     LaunchedEffect(userMessage) {
         userMessage?.let { msg ->
             snackbarHostState.showSnackbar(msg)
@@ -127,9 +135,13 @@ fun MilkApp(
         }
     }
 
-    // In-app Back Navigation: If not on Dashboard, Back returns to Dashboard
-    BackHandler(enabled = currentScreen != AppScreen.Dashboard) {
-        currentScreen = AppScreen.Dashboard
+    // In-app Back Navigation: If inside specific farmer weekly view, go back to master list first
+    BackHandler(enabled = currentScreen != AppScreen.Dashboard || selectedWeeklyFarmerId != null) {
+        if (currentScreen == AppScreen.Weekly && selectedWeeklyFarmerId != null) {
+            viewModel.clearWeeklyFarmerSelection()
+        } else {
+            currentScreen = AppScreen.Dashboard
+        }
     }
 
     fun exportCsvAction() {
@@ -196,11 +208,17 @@ fun MilkApp(
                         }
                     },
                     navigationIcon = {
-                        if (currentScreen != AppScreen.Dashboard) {
-                            IconButton(onClick = { currentScreen = AppScreen.Dashboard }) {
+                        if (currentScreen != AppScreen.Dashboard || (currentScreen == AppScreen.Weekly && selectedWeeklyFarmerId != null)) {
+                            IconButton(onClick = {
+                                if (currentScreen == AppScreen.Weekly && selectedWeeklyFarmerId != null) {
+                                    viewModel.clearWeeklyFarmerSelection()
+                                } else {
+                                    currentScreen = AppScreen.Dashboard
+                                }
+                            }) {
                                 Icon(
                                     Icons.AutoMirrored.Filled.ArrowBack,
-                                    contentDescription = "Back to Dashboard",
+                                    contentDescription = "Back",
                                     tint = Color.White
                                 )
                             }
@@ -256,7 +274,10 @@ fun MilkApp(
             Surface(
                 color = MaterialTheme.colorScheme.surface,
                 shadowElevation = 8.dp,
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .padding(bottom = 6.dp)
             ) {
                 ScrollableTabRow(
                     selectedTabIndex = currentScreen.ordinal,
@@ -323,8 +344,30 @@ fun MilkApp(
                 )
 
                 AppScreen.Farmers -> FarmersScreen(
-                    viewModel = viewModel
+                    viewModel = viewModel,
+                    onNavigateToWeekly = { farmer ->
+                        viewModel.selectFarmerForWeekly(farmer.id)
+                        currentScreen = AppScreen.Weekly
+                    }
                 )
+
+                AppScreen.Weekly -> {
+                    if (selectedWeeklyFarmerId == null) {
+                        FarmerMasterListScreen(
+                            viewModel = viewModel,
+                            onSelectFarmer = { farmer ->
+                                viewModel.selectFarmerForWeekly(farmer.id)
+                            }
+                        )
+                    } else {
+                        FarmerWeeklyEntryScreen(
+                            viewModel = viewModel,
+                            onBackToList = {
+                                viewModel.clearWeeklyFarmerSelection()
+                            }
+                        )
+                    }
+                }
 
                 AppScreen.Records -> RecordsScreen(
                     viewModel = viewModel,
@@ -452,22 +495,22 @@ fun MilkApp(
 
                         Text("Switch Google / Gmail Account:", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
 
-                        OutlinedTextField(
+                        AppFormField(
+                            label = "GMAIL ADDRESS",
                             value = customEmailInput,
                             onValueChange = { customEmailInput = it },
-                            label = { Text("Gmail Address", fontSize = 12.sp) },
+                            placeholder = "e.g. yourname@gmail.com",
                             singleLine = true,
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(10.dp)
+                            modifier = Modifier.fillMaxWidth()
                         )
 
-                        OutlinedTextField(
+                        AppFormField(
+                            label = "FULL NAME / DAIRY OPERATOR",
                             value = customNameInput,
                             onValueChange = { customNameInput = it },
-                            label = { Text("Full Name", fontSize = 12.sp) },
+                            placeholder = "e.g. Bilal Ahmad",
                             singleLine = true,
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(10.dp)
+                            modifier = Modifier.fillMaxWidth()
                         )
 
                         Button(
@@ -503,24 +546,22 @@ fun MilkApp(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
 
-                        OutlinedTextField(
+                        AppFormField(
+                            label = "GMAIL ADDRESS",
                             value = customEmailInput,
                             onValueChange = { customEmailInput = it },
-                            label = { Text("Enter Gmail Address", fontSize = 12.sp) },
-                            placeholder = { Text("e.g. bilal.dairy@gmail.com") },
+                            placeholder = "e.g. bilal.dairy@gmail.com",
                             singleLine = true,
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(10.dp)
+                            modifier = Modifier.fillMaxWidth()
                         )
 
-                        OutlinedTextField(
+                        AppFormField(
+                            label = "OPERATOR NAME",
                             value = customNameInput,
                             onValueChange = { customNameInput = it },
-                            label = { Text("Operator Name", fontSize = 12.sp) },
-                            placeholder = { Text("e.g. Bilal Ahmad") },
+                            placeholder = "e.g. Bilal Ahmad",
                             singleLine = true,
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(10.dp)
+                            modifier = Modifier.fillMaxWidth()
                         )
 
                         Button(
